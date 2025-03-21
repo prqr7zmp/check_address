@@ -17,3 +17,6 @@ http://127.0.0.1:5000
 https://front.geospatial.jp/
 #### 西条市（松山地方法務局西条支局）登記所備付地図データ
 https://www.geospatial.jp/ckan/dataset/houmusyouchizu-2023-1-1679
+
+### 西条市立小・中学校の通学区域
+https://www.city.saijo.ehime.jp/soshiki/gakkokyoiku/gk0044.html
