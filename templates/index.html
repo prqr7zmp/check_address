@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Map with Pins</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        #mapid { height: 500px; }
+        .pin-checked {
+            /* チェックされているピンの色 */
+            background-color: blue;
+            border: 2px solid blue;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .pin-unchecked {
+            /* チェックされていないピンの色 */
+            background-color: red;
+            border: 2px solid red;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .custom-pin {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            transform: translate(-50%, -50%); /* 中心をピンの場所に合わせる */
+        }
+        .custom-pin::before {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 10px solid black; /* 影の色 */
+            transform: translateX(-50%);
+        }
+        .pin-checked::before {
+            border-top-color: blue; /* チェックされているピンの影の色 */
+        }
+        .pin-unchecked::before {
+            border-top-color: red; /* チェックされていないピンの影の色 */
+        }
+    </style>
+</head>
+<body>
+    <div id="mapid"></div>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('mapid').setView([33.8924201, 133.1427989], 13);
+
+        // 国土地理院 標準地図
+        var gsiStd = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
+            attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'
+        });
+
+        // 国土地理院 写真
+        var gsiOrt = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg', {
+            attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'
+        });
+
+        // 初期表示のレイヤーを設定 (ここでは標準地図を初期表示とします)
+        gsiStd.addTo(map);
+
+        // レイヤーコントロールを作成して地図に追加
+        var baseMaps = {
+            "標準地図": gsiStd,
+            "写真": gsiOrt
+        };
+
+        L.control.layers(baseMaps).addTo(map);
+
+        var pins = {}; // 緯度経度をキーとしてピンの情報を保持
+
+        // カスタムアイコンの作成
+        var checkedIcon = L.divIcon({
+            className: 'custom-pin pin-checked',
+            iconSize: [10, 10],
+            iconAnchor: [5, 5],
+            popupAnchor: [0, -10]
+        });
+
+        var uncheckedIcon = L.divIcon({
+            className: 'custom-pin pin-unchecked',
+            iconSize: [10, 10],
+            iconAnchor: [5, 5],
+            popupAnchor: [0, -10]
+        });
+
+        // サーバーからピンの情報を取得して表示
+        function loadPins() {
+            fetch('/api/pins')
+                .then(response => response.json())
+                .then(data => {
+                    data.forEach(pinData => {
+                        addPinToMap(pinData.latitude, pinData.longitude, pinData.checked, pinData.id);
+                    });
+                    console.log("Full pins object:", pins); // ← 追加
+                });
+        }        
+
+        function addPinToMap(latitude, longitude, checked, pinId) {
+            console.log("addPinToMap (Custom Icon) - Latitude:", latitude, "Longitude:", longitude, "Checked:", checked);
+            var currentIcon = checked ? checkedIcon : uncheckedIcon;
+            var marker = L.marker([latitude, longitude], { icon: currentIcon }).addTo(map);
+            const key = `${latitude}-${longitude}`;
+            pins[key] = { marker: marker, checked: checked, id: pinId }; // チェック状態とIDも保存
+
+            var checkboxId = 'checkbox-' + pinId; // サーバーから返された id を使用
+            var popupContent = `
+                <div>
+                    <input type="checkbox" id="${checkboxId}" data-pin-id="${pinId}" ${checked ? 'checked' : ''}>
+                    Latitude: ${latitude}<br>
+                    Longitude: ${longitude}
+                </div>
+            `;
+            marker.bindPopup(popupContent).on('popupopen', function(e) { // ポップアップが開いた時の処理
+                var checkbox = document.getElementById(checkboxId);
+                if (checkbox) {
+                    const latlng = e.target.getLatLng(); // イベントを発火させたマーカーの緯度経度を取得
+                    const key = `${latlng.lat}-${latlng.lng}`; // 取得した緯度経度でキーを作成
+                    checkbox.checked = pins[key].checked; // 保存されている checked 状態を設定
+
+                    checkbox.addEventListener('change', function() {
+                        pins[key].checked = this.checked;
+                        console.log("pins object after checkbox change:", pins);
+                        const currentPinId = this.dataset.pinId;
+                        console.log(`change event - Retrieved Pin ID from dataset: ${currentPinId}, Checked state changed to: ${this.checked}`);
+                        console.log(`PUT request URL: /api/pins/${currentPinId}`);
+                        fetch(`/api/pins/${currentPinId}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ checked: this.checked }),
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            console.log('Server updated:', data);
+                            const newIcon = this.checked ? checkedIcon : uncheckedIcon;
+                            pins[key].marker.setIcon(newIcon);
+                        })
+                        .catch(error => {
+                            console.error('Error updating server:', error);
+                        });
+                    });
+                }
+            });
+        }
+        // ページ読み込み時にピンをロード
+        document.addEventListener('DOMContentLoaded', loadPins);
+    </script>
+</body>
+</html>
